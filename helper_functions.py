@@ -8,14 +8,17 @@ from tqdm import tqdm
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 L = 3.5e-3  # thickness [m]
-pi2_over_L2 = (torch.pi / L)**2
+pi2_over_L2 = (torch.pi / L)**2 # Our simplification of second derivative in depth
 
 class SurfacePINN(nn.Module):
+    """
+    Simple PINN network architecture used in our experiment size was selected arbitrary
+    """
     def __init__(self):
         super().__init__()
 
         self.net = nn.Sequential(
-            nn.Linear(3, 128),
+            nn.Linear(3, 128), # We only input x,y,t coordinates as per our simplification
             nn.Tanh(),
             nn.Linear(128, 128),
             nn.Tanh(),
@@ -24,7 +27,7 @@ class SurfacePINN(nn.Module):
             nn.Linear(128, 1)
         )
 
-        # learn diffusivities (log-parametrization!)
+        # learn diffusivities (log-parametrization since our target variable are close to noise in single point precision)
         self.log_alpha_x = nn.Parameter(torch.tensor([-13.0]))
         self.log_alpha_y = nn.Parameter(torch.tensor([-13.0]))
         self.log_alpha_z = nn.Parameter(torch.tensor([-13.0]))
@@ -33,6 +36,7 @@ class SurfacePINN(nn.Module):
         inp = torch.cat([x, y, t], dim=1)
         return self.net(inp)
 
+    # Methods used to retrieve physical values of diffusion
     def alpha_x(self):
         return torch.exp(self.log_alpha_x)
 
@@ -42,8 +46,9 @@ class SurfacePINN(nn.Module):
     def alpha_z(self):
         return torch.exp(self.log_alpha_z)
     
+
 def create_training_data(T_patch):
-    # T_patch: [Nt, H, W]
+    # T_patch: [Nt, H, W] used for creating data points
 
     Nt, H, W = T_patch.shape
 
@@ -57,6 +62,7 @@ def create_training_data(T_patch):
     values = T_patch.reshape(-1, 1)
 
     return coords.to(device), values.to(device)
+
 
 def pde_loss(model, coords):
 
