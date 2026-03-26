@@ -75,7 +75,7 @@ trained_model, l_t, l_d, l_p , a_x_track, a_y_track, a_z_track= train(model, coo
 # -----------------------------
 # Save (FIXED)
 # -----------------------------
-torch.save(trained_model.state_dict(), 'model_pinn_1_laser.pth')
+torch.save(trained_model.state_dict(), 'model_pinn_1_longer.pth')
 torch.save(torch.tensor(l_t), 'total_loss_1.pt')
 torch.save(torch.tensor(l_d), 'data_loss.pt')
 torch.save(torch.tensor(l_p), 'pde_loss.pt')
