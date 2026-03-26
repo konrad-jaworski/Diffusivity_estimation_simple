@@ -16,7 +16,7 @@ data = np.load(
 )
 
 # -----------------------------
-# Patch extraction + conversion
+# Patch extraction + conversion to C degrees
 # -----------------------------
 T_patch = data['data'][:,190:290,250:350] / 100 - 273.15  
 
