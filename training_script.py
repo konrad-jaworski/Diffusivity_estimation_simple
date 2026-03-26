@@ -18,7 +18,8 @@ data = np.load(
 # -----------------------------
 # Patch extraction + conversion to C degrees
 # -----------------------------
-T_patch = data['data'][:,190:290,250:350] / 100 - 273.15  
+T_patch = data['data'][:,190:290,250:350] / 100 - 273.15
+# T_patch = data['data'][:,:,:] / 100 - 273.15  
 
 # -----------------------------
 # Peak detection for filtering
@@ -34,6 +35,8 @@ T_patch = T_patch[t_peak_idx:]
 # use initial frame before heating
 # -----------------------------
 T_inf = data['data'][0,190:290,250:350].mean() / 100 - 273.15
+# T_inf = data['data'][0,:,:].mean() / 100 - 273.15
+
 
 # -----------------------------
 # Normalize 
@@ -67,12 +70,15 @@ values = values.to(device)
 # -----------------------------
 model = SurfacePINN().to(device)
 
-trained_model, l_t, l_d, l_p = train(model, coords, values,Nt,H,W)
+trained_model, l_t, l_d, l_p , a_x_track, a_y_track, a_z_track= train(model, coords, values,Nt,H,W)
 
 # -----------------------------
 # Save (FIXED)
 # -----------------------------
-torch.save(trained_model.state_dict(), 'model_pinn_1.pth')
+torch.save(trained_model.state_dict(), 'model_pinn_1_laser.pth')
 torch.save(torch.tensor(l_t), 'total_loss_1.pt')
 torch.save(torch.tensor(l_d), 'data_loss.pt')
 torch.save(torch.tensor(l_p), 'pde_loss.pt')
+torch.save(torch.tensor(a_x_track),'a_x_track.pt')
+torch.save(torch.tensor(a_y_track),'a_y_track.pt')
+torch.save(torch.tensor(a_z_track),'a_z_track.pt')

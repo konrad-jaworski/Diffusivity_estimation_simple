@@ -126,13 +126,14 @@ def sample_batch(coords, values, batch_size, Nt, H, W, device):
 
     return coords_b, values_b
 
-def train(model, coords, values, Nt, H, W, epochs=5000, lr=1e-3, batch_size=32768,weight=1.0):
+def train(model, coords, values, Nt, H, W, epochs=10000, lr=1e-3, batch_size=32768,weight=1.0):
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     model.train()
 
     loss_total, loss_data, loss_physics = [], [], []
+    a_x_track, a_y_track, a_z_track = [], [], []
 
     lambda_pde = weight
 
@@ -149,9 +150,15 @@ def train(model, coords, values, Nt, H, W, epochs=5000, lr=1e-3, batch_size=3276
         loss.backward()
         optimizer.step()
 
+
         loss_total.append(loss.item())
         loss_data.append(loss_d.item())
         loss_physics.append(loss_p.item())
+        with torch.no_grad():
+            a_x_track.append(model.alpha_x().item())
+            a_y_track.append(model.alpha_y().item())
+            a_z_track.append(model.alpha_z().item())
+
 
         if epoch % 250 == 0:
             print(f"[{epoch:5d}] "
@@ -164,4 +171,4 @@ def train(model, coords, values, Nt, H, W, epochs=5000, lr=1e-3, batch_size=3276
 
     model.eval()
 
-    return model, loss_total, loss_data, loss_physics
+    return model, loss_total, loss_data, loss_physics,a_x_track,a_y_track,a_z_track
