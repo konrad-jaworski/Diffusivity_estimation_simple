@@ -71,7 +71,7 @@ values = values.to(device)
 # -----------------------------
 model = SurfacePINN().to(device)
 
-trained_model, l_t, l_d, l_p , a_x_track, a_y_track, a_z_track= train(model, coords, values,Nt,H,W)
+trained_model, l_t, l_d, l_p , a_x_track, a_y_track, a_z_track= train(model, coords, values,Nt,H,W,batch_size=1000000)
 
 # -----------------------------
 # Save
