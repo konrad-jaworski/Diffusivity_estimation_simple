@@ -19,8 +19,8 @@ data = np.load(
 # Patch extraction + conversion to C degrees
 # -----------------------------
 # T_patch = data['data'][:,190:290,250:350] / 100 - 273.15 # Halogen excitation patch
-T_patch = data['data'][:,150:350,230:430] / 100 - 273.15 # Laser excitation patch
-
+# T_patch = data['data'][:,150:350,230:430] / 100 - 273.15 # Laser excitation patch
+T_patch = data['data'][:,225:275,305:355] / 100 - 273.15 # Smaller laser patch
 
 # -----------------------------
 # Peak detection for filtering
@@ -36,8 +36,8 @@ T_patch = T_patch[t_peak_idx:]
 # use initial frame before heating
 # -----------------------------
 # T_inf = data['data'][0,190:290,250:350].mean() / 100 - 273.15
-T_inf = data['data'][0,150:350,230:430].mean() / 100 - 273.15
-
+# T_inf = data['data'][0,150:350,230:430].mean() / 100 - 273.15
+T_inf = data['data'][:,225:275,305:355].mean() / 100 - 273.15
 
 # -----------------------------
 # Normalize 
@@ -71,7 +71,7 @@ values = values.to(device)
 # -----------------------------
 model = SurfacePINN().to(device)
 
-trained_model, l_t, l_d, l_p , a_x_track, a_y_track, a_z_track= train(model, coords, values,Nt,H,W,batch_size=1000000)
+trained_model, l_t, l_d, l_p , a_x_track, a_y_track, a_z_track= train(model, coords, values,Nt,H,W,epochs=100000)
 
 # -----------------------------
 # Save

@@ -64,34 +64,78 @@ def create_training_data(T_patch):
     return coords.to(device), values.to(device)
 
 
-def pde_loss(model, coords):
+# def pde_loss(model, coords):
+
+#     coords = coords.clone().detach().requires_grad_(True)
+
+#     x = coords[:, 0:1]
+#     y = coords[:, 1:2]
+#     t = coords[:, 2:3]
+
+#     T = model(x, y, t)
+
+#     ones = torch.ones_like(T)
+
+#     T_t = torch.autograd.grad(T, t, ones, create_graph=True)[0]
+
+#     T_x = torch.autograd.grad(T, x, ones, create_graph=True)[0]
+#     T_xx = torch.autograd.grad(T_x, x, ones, create_graph=True)[0]
+
+#     T_y = torch.autograd.grad(T, y, ones, create_graph=True)[0]
+#     T_yy = torch.autograd.grad(T_y, y, ones, create_graph=True)[0]
+
+#     alpha_x = model.alpha_x()
+#     alpha_y = model.alpha_y()
+#     alpha_z = model.alpha_z()
+
+#     residual = T_t - (
+#         alpha_x * T_xx +
+#         alpha_y * T_yy -
+#         alpha_z * pi2_over_L2 * T
+#     )
+
+#     return torch.mean(residual**2)
+
+def pde_loss(model, coords, Nt, H, W):
 
     coords = coords.clone().detach().requires_grad_(True)
 
-    x = coords[:, 0:1]
-    y = coords[:, 1:2]
-    t = coords[:, 2:3]
+    x = coords[:,0:1]
+    y = coords[:,1:2]
+    t = coords[:,2:3]
 
-    T = model(x, y, t)
+    T = model(x,y,t)
 
     ones = torch.ones_like(T)
 
     T_t = torch.autograd.grad(T, t, ones, create_graph=True)[0]
-
     T_x = torch.autograd.grad(T, x, ones, create_graph=True)[0]
     T_xx = torch.autograd.grad(T_x, x, ones, create_graph=True)[0]
-
     T_y = torch.autograd.grad(T, y, ones, create_graph=True)[0]
     T_yy = torch.autograd.grad(T_y, y, ones, create_graph=True)[0]
+
+    # --- PHYSICAL SCALING ---
+    dx = 1e-4 # 100 um
+    dy = 1e-4 # 100 um 
+    dt = 1/50 # 50 fps
+
+    Lx = dx * W
+    Ly = dy * H
+    Tmax = dt * Nt
+
+    T_t_phys = T_t / dt
+    T_xx_phys = T_xx / (dx**2)
+    T_yy_phys = T_yy / (dy**2)
+
 
     alpha_x = model.alpha_x()
     alpha_y = model.alpha_y()
     alpha_z = model.alpha_z()
 
-    residual = T_t - (
-        alpha_x * T_xx +
-        alpha_y * T_yy -
-        alpha_z * pi2_over_L2 * T
+    residual = T_t_phys - (
+    alpha_x * T_xx_phys +
+    alpha_y * T_yy_phys -
+    alpha_z * pi2_over_L2 * T
     )
 
     return torch.mean(residual**2)
@@ -142,8 +186,8 @@ def train(model, coords, values, Nt, H, W, epochs=10000, lr=1e-3, batch_size=327
         coords_b, values_b = sample_batch(coords, values, batch_size, Nt, H, W, device)
 
         loss_d = data_loss(model, coords_b, values_b)
-        loss_p = pde_loss(model, coords_b)
-
+        # loss_p = pde_loss(model, coords_b) # Utilize different loss function
+        loss_p = pde_loss(model,coords_b,Nt,H,W)
         loss = loss_d + lambda_pde * loss_p
 
         optimizer.zero_grad(set_to_none=True)
