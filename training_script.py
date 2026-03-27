@@ -11,15 +11,16 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # Load data
 # -----------------------------
 data = np.load(
-    "/home/kjaworski/Pulpit/Thermal_diffusivity_est/Diffusivity_estimation_simple/data/2026_03_18_CFRP_FBH_3s_30s_top_symetrical.npz",
+    "/home/kjaworski/Pulpit/Thermal_diffusivity_est/Diffusivity_estimation_simple/data/2025_09_12_CFRP_FBH_diffusivity_stationary_p1.npz",
     allow_pickle=True
 )
 
 # -----------------------------
 # Patch extraction + conversion to C degrees
 # -----------------------------
-T_patch = data['data'][:,190:290,250:350] / 100 - 273.15
-# T_patch = data['data'][:,:,:] / 100 - 273.15  
+# T_patch = data['data'][:,190:290,250:350] / 100 - 273.15 # Halogen excitation patch
+T_patch = data['data'][:,150:350,230:430] / 100 - 273.15 # Laser excitation patch
+
 
 # -----------------------------
 # Peak detection for filtering
@@ -34,8 +35,8 @@ T_patch = T_patch[t_peak_idx:]
 # Ambient
 # use initial frame before heating
 # -----------------------------
-T_inf = data['data'][0,190:290,250:350].mean() / 100 - 273.15
-# T_inf = data['data'][0,:,:].mean() / 100 - 273.15
+# T_inf = data['data'][0,190:290,250:350].mean() / 100 - 273.15
+T_inf = data['data'][0,150:350,230:430].mean() / 100 - 273.15
 
 
 # -----------------------------
@@ -48,7 +49,7 @@ T_patch = (T_patch - T_inf) / (scale + eps)
 # -----------------------------
 # Temporal filtering
 # -----------------------------
-T_patch = savgol_filter(T_patch, window_length=19, polyorder=3, axis=0)
+# T_patch = savgol_filter(T_patch, window_length=19, polyorder=3, axis=0) # We do not filter it for the laser heating since we have clean response
 
 # clip safety
 T_patch = np.clip(T_patch, 0.0, None)
@@ -73,10 +74,10 @@ model = SurfacePINN().to(device)
 trained_model, l_t, l_d, l_p , a_x_track, a_y_track, a_z_track= train(model, coords, values,Nt,H,W)
 
 # -----------------------------
-# Save (FIXED)
+# Save
 # -----------------------------
-torch.save(trained_model.state_dict(), 'model_pinn_1_longer.pth')
-torch.save(torch.tensor(l_t), 'total_loss_1.pt')
+torch.save(trained_model.state_dict(), 'model_pinn_1_laser.pth')
+torch.save(torch.tensor(l_t), 'total_loss.pt')
 torch.save(torch.tensor(l_d), 'data_loss.pt')
 torch.save(torch.tensor(l_p), 'pde_loss.pt')
 torch.save(torch.tensor(a_x_track),'a_x_track.pt')
