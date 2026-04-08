@@ -48,7 +48,7 @@ class SurfacePINN(nn.Module):
     
 
 def create_training_data(T_patch):
-    # T_patch: [Nt, H, W] used for creating data points
+    # T_patch: [Nt, H, W] used for creating data points for the input to the PINN model
 
     Nt, H, W = T_patch.shape
 
@@ -63,6 +63,117 @@ def create_training_data(T_patch):
 
     return coords.to(device), values.to(device)
 
+def _lhs_unit(n, device):
+    """
+    Latin Hypercube samples in [0,1), one point per bin.
+    Returns shape [n].
+    """
+    u = (torch.arange(n, device=device, dtype=torch.float32) + torch.rand(n, device=device)) / n
+    return u[torch.randperm(n, device=device)]
+
+
+def _to_normalized_coords(t_idx, y_idx, x_idx, Nt, H, W):
+    """
+    Convert integer grid indices to normalized coordinates in [0,1].
+    Output shape: [B, 3] with columns [t, y, x]
+    """
+    t = t_idx.float() / max(Nt - 1, 1)
+    y = y_idx.float() / max(H - 1, 1)
+    x = x_idx.float() / max(W - 1, 1)
+
+    coords = torch.stack([t, y, x], dim=1)
+    return coords
+
+
+def sample_data_random_cube(patch, batch_size):
+    """
+    Random sampling directly from a 3D data cube.
+
+    Parameters
+    ----------
+    patch : torch.Tensor
+        Shape [Nt, H, W]
+    batch_size : int
+
+    Returns
+    -------
+    coords_b : torch.Tensor
+        Shape [B, 3], normalized coords [t, y, x]
+    values_b : torch.Tensor
+        Shape [B, 1]
+    """
+    device = patch.device
+    Nt, H, W = patch.shape
+
+    t_idx = torch.randint(0, Nt, (batch_size,), device=device)
+    y_idx = torch.randint(0, H,  (batch_size,), device=device)
+    x_idx = torch.randint(0, W,  (batch_size,), device=device)
+
+    coords_b = _to_normalized_coords(t_idx, y_idx, x_idx, Nt, H, W).clone().detach()
+    values_b = patch[t_idx, y_idx, x_idx].unsqueeze(1)
+
+    return coords_b, values_b
+
+
+def sample_data_lhs_cube(patch, batch_size):
+    """
+    LHS-style sampling directly from a 3D data cube.
+
+    Parameters
+    ----------
+    patch : torch.Tensor
+        Shape [Nt, H, W]
+    batch_size : int
+
+    Returns
+    -------
+    coords_b : torch.Tensor
+        Shape [B, 3], normalized coords [t, y, x]
+    values_b : torch.Tensor
+        Shape [B, 1]
+    """
+    device = patch.device
+    Nt, H, W = patch.shape
+
+    t_idx = torch.clamp((_lhs_unit(batch_size, device) * Nt).long(), 0, Nt - 1)
+    y_idx = torch.clamp((_lhs_unit(batch_size, device) * H).long(), 0, H - 1)
+    x_idx = torch.clamp((_lhs_unit(batch_size, device) * W).long(), 0, W - 1)
+
+    coords_b = _to_normalized_coords(t_idx, y_idx, x_idx, Nt, H, W).clone().detach()
+    values_b = patch[t_idx, y_idx, x_idx].unsqueeze(1)
+
+    return coords_b, values_b
+
+
+def sample_collocation_random(batch_size, device):
+    """
+    Random collocation points in normalized continuous domain [0,1]^3.
+
+    Returns
+    -------
+    coords_f : torch.Tensor
+        Shape [B, 3], columns [t, y, x]
+    """
+    coords_f = torch.rand(batch_size, 3, device=device)
+    return coords_f
+
+
+def sample_collocation_lhs(batch_size, device):
+    """
+    LHS collocation points in normalized continuous domain [0,1]^3.
+
+    Returns
+    -------
+    coords_f : torch.Tensor
+        Shape [B, 3], columns [t, y, x]
+    """
+    t = _lhs_unit(batch_size, device)
+    y = _lhs_unit(batch_size, device)
+    x = _lhs_unit(batch_size, device)
+
+    coords_f = torch.stack([t, y, x], dim=1)
+    return coords_f
+
 
 # def pde_loss(model, coords):
 
@@ -72,7 +183,7 @@ def create_training_data(T_patch):
 #     y = coords[:, 1:2]
 #     t = coords[:, 2:3]
 
-#     T = model(x, y, t)
+#     T = model(x, y, t) # At this point temperature is between 0 and 1
 
 #     ones = torch.ones_like(T)
 
@@ -84,7 +195,7 @@ def create_training_data(T_patch):
 #     T_y = torch.autograd.grad(T, y, ones, create_graph=True)[0]
 #     T_yy = torch.autograd.grad(T_y, y, ones, create_graph=True)[0]
 
-#     alpha_x = model.alpha_x()
+#     alpha_x = model.alpha_x() # Here we retrieve the diffusivity values encoded in log space, so those are small values
 #     alpha_y = model.alpha_y()
 #     alpha_z = model.alpha_z()
 
@@ -216,3 +327,4 @@ def train(model, coords, values, Nt, H, W, epochs=10000, lr=1e-3, batch_size=327
     model.eval()
 
     return model, loss_total, loss_data, loss_physics,a_x_track,a_y_track,a_z_track
+
