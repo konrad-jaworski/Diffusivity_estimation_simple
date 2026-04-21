@@ -10,50 +10,9 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # -----------------------------
 # Load data
 # -----------------------------
-data = np.load(
-    "/home/kjaworski/Pulpit/Thermal_diffusivity_est/Diffusivity_estimation_simple/data/2025_09_12_CFRP_FBH_diffusivity_stationary_p1.npz",
-    allow_pickle=True
-)
-
-# -----------------------------
-# Patch extraction + conversion to C degrees
-# -----------------------------
-# T_patch = data['data'][:,190:290,250:350] / 100 - 273.15 # Halogen excitation patch
-T_patch = data['data'][:,150:350,230:430] / 100 - 273.15 # Laser excitation patch
-# T_patch = data['data'][:,225:275,305:355] / 100 - 273.15 # Smaller laser patch
-
-# -----------------------------
-# Peak detection for filtering
-# -----------------------------
-t_signal = T_patch.mean(axis=(1,2))
-t_peak_idx = np.argmax(t_signal)
-
-# cut cooling
-T_patch = T_patch[t_peak_idx:]
-
-# -----------------------------
-# Ambient
-# use initial frame before heating
-# -----------------------------
-# T_inf = data['data'][0,190:290,250:350].mean() / 100 - 273.15
-T_inf = data['data'][0,150:350,230:430].mean() / 100 - 273.15
-# T_inf = data['data'][:,225:275,305:355].mean() / 100 - 273.15 # Smaller path of laser heating
-
-# -----------------------------
-# Normalize This remains under investigation since it should not affect the PDE but it scales can but we remove ambient
-# -----------------------------
-eps = 1e-8
-scale = T_patch.max() - T_inf
-T_patch = (T_patch - T_inf) / (scale + eps)
-
-
-# -----------------------------
-# Temporal filtering
-# -----------------------------
-# T_patch = savgol_filter(T_patch, window_length=19, polyorder=3, axis=0) # We do not filter it for the laser heating since we have clean response
-
-# clip safety
-T_patch = np.clip(T_patch, 0.0, None)
+sample=np.load("",allow_pickle=True)
+X=sample['coord']
+Y=sample['temp']
 
 # -----------------------------
 # To torch
@@ -63,7 +22,7 @@ Nt, H, W = T_patch.shape
 # -----------------------------
 # Training data
 # -----------------------------
-coords, values = create_training_data(T_patch)
+
 coords = coords.to(device)
 values = values.to(device)
 
@@ -72,7 +31,52 @@ values = values.to(device)
 # -----------------------------
 model = SurfacePINN().to(device)
 
-trained_model, l_t, l_d, l_p , a_x_track, a_y_track, a_z_track= train(model, coords, values,Nt,H,W,epochs=10000)
+lr=1e-3
+optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+model.train()
+
+loss_total, loss_data, loss_physics = [], [], []
+a_x_track, a_y_track, a_z_track = [], [], []
+
+weight=1
+lambda_pde = weight
+
+epochs=40000
+batch_size=128
+
+for epoch in tqdm(range(epochs)):
+
+    coords_b, values_b = sample_batch(coords, values, batch_size, Nt, H, W, device)
+
+    loss_d = data_loss(model, coords_b, values_b)
+    loss_p = pde_loss(model,coords_b,Nt,H,W)
+    loss = loss_d + lambda_pde * loss_p
+
+    optimizer.zero_grad(set_to_none=True)
+    loss.backward()
+    optimizer.step()
+
+
+    loss_total.append(loss.item())
+    loss_data.append(loss_d.item())
+    loss_physics.append(loss_p.item())
+    with torch.no_grad():
+        a_x_track.append(model.alpha_x().item())
+        a_y_track.append(model.alpha_y().item())
+        a_z_track.append(model.alpha_z().item())
+
+
+    if epoch % 250 == 0:
+        print(f"[{epoch:5d}] "
+                f"L_data={loss_d.item():.3e} | "
+                f"L_pde={loss_p.item():.3e} | "
+                f"L_total={loss.item():.3e} | "
+                f"αx={model.alpha_x().item():.2e} | "
+                f"αy={model.alpha_y().item():.2e} | "
+                f"αz={model.alpha_z().item():.2e}")
+
+model.eval()
 
 # -----------------------------
 # Save
