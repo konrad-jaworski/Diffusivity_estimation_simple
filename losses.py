@@ -4,92 +4,70 @@ import torch
 from scipy.signal import savgol_filter
 import torch.nn as nn
 from tqdm import tqdm
+import math
 
 
-L = 3.5e-3  # thickness [m]
-pi2_over_L2 = (torch.pi / L)**2 # Our simplification of second derivative in depth
+def gradients(u, x, order=1):
+    """
+    Compute first or second derivative of u with respect to x.
+    u: [N, 1]
+    x: [N, 1] with requires_grad=True
+    """
+    if order == 1:
+        return torch.autograd.grad(
+            u, x,
+            grad_outputs=torch.ones_like(u),
+            create_graph=True,
+            retain_graph=True
+        )[0]
 
+    elif order == 2:
+        du_dx = torch.autograd.grad(
+            u, x,
+            grad_outputs=torch.ones_like(u),
+            create_graph=True,
+            retain_graph=True
+        )[0]
 
-def pde_loss_primitive(model, coords):
+        d2u_dx2 = torch.autograd.grad(
+            du_dx, x,
+            grad_outputs=torch.ones_like(du_dx),
+            create_graph=True,
+            retain_graph=True
+        )[0]
 
-    coords = coords.clone().detach().requires_grad_(True)
+        return d2u_dx2
 
-    x = coords[:, 0:1]
-    y = coords[:, 1:2]
-    t = coords[:, 2:3]
+    else:
+        raise ValueError("order must be 1 or 2")
+    
+def pde_residual_normalized(model, x, y, t):
+    """
+    PDE residual in normalized coordinates for:
 
-    T = model(x, y, t) # At this point temperature is between 0 and 1
+        theta_t = beta_x * theta_xx + beta_y * theta_yy - beta_z * pi^2 * theta
 
-    ones = torch.ones_like(T)
+    Residual:
+        r = theta_t - beta_x*theta_xx - beta_y*theta_yy + beta_z*pi^2*theta
 
-    T_t = torch.autograd.grad(T, t, ones, create_graph=True)[0]
+    Inputs x, y, t are normalized to [0,1] and require grad.
+    """
+    theta = model(x, y, t)
 
-    T_x = torch.autograd.grad(T, x, ones, create_graph=True)[0]
-    T_xx = torch.autograd.grad(T_x, x, ones, create_graph=True)[0]
+    theta_t  = gradients(theta, t, order=1)
+    theta_xx = gradients(theta, x, order=2)
+    theta_yy = gradients(theta, y, order=2)
 
-    T_y = torch.autograd.grad(T, y, ones, create_graph=True)[0]
-    T_yy = torch.autograd.grad(T_y, y, ones, create_graph=True)[0]
+    beta_x = model.beta_x()
+    beta_y = model.beta_y()
+    beta_z = model.beta_z()
 
-    alpha_x = model.alpha_x() # Here we retrieve the diffusivity values encoded in log space, so those are small values
-    alpha_y = model.alpha_y()
-    alpha_z = model.alpha_z()
+    residual = theta_t - beta_x * theta_xx - beta_y * theta_yy + beta_z * (math.pi ** 2) * theta
+    return residual
 
-    residual = T_t - (
-        alpha_x * T_xx +
-        alpha_y * T_yy -
-        alpha_z * pi2_over_L2 * T
-    )
-
-    return torch.mean(residual**2)
-
-def pde_loss_physical(model, coords, Nt, H, W):
-
-    coords = coords.clone().detach().requires_grad_(True)
-
-    x = coords[:,0:1]
-    y = coords[:,1:2]
-    t = coords[:,2:3]
-
-    T = model(x,y,t)
-
-    ones = torch.ones_like(T)
-
-    T_t = torch.autograd.grad(T, t, ones, create_graph=True)[0]
-    T_x = torch.autograd.grad(T, x, ones, create_graph=True)[0]
-    T_xx = torch.autograd.grad(T_x, x, ones, create_graph=True)[0]
-    T_y = torch.autograd.grad(T, y, ones, create_graph=True)[0]
-    T_yy = torch.autograd.grad(T_y, y, ones, create_graph=True)[0]
-
-    # --- PHYSICAL SCALING ---
-    dx = 1e-4 # 100 um
-    dy = 1e-4 # 100 um 
-    dt = 1/50 # 50 fps
-
-    Lx = dx * W
-    Ly = dy * H
-    Tmax = dt * Nt
-
-    T_t_phys = T_t / dt
-    T_xx_phys = T_xx / (dx**2)
-    T_yy_phys = T_yy / (dy**2)
-
-
-    alpha_x = model.alpha_x()
-    alpha_y = model.alpha_y()
-    alpha_z = model.alpha_z()
-
-    residual = T_t_phys - (
-    alpha_x * T_xx_phys +
-    alpha_y * T_yy_phys -
-    alpha_z * pi2_over_L2 * T
-    )
-
-    return torch.mean(residual**2)
-
-def pde_loss_less(model, coords, Nt, H, W):
-    pass
-
-
+def pde_loss(model, x, y, t):
+    r = pde_residual_normalized(model, x, y, t)
+    return torch.mean(r ** 2)
 
 #---------------------------------------------- Data loss --------------------------
 def data_loss(model, coords, T_true):
