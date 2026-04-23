@@ -22,7 +22,7 @@ lambda_data = 1.0
 lambda_pde = 1.0
 lambda_init = 1.0
 epochs = 40000
-batch_size = 128
+batch_size = 524288
 hidden_layers = 3
 number_of_neurons = 100
 
@@ -100,8 +100,8 @@ batch_num_init = (coords_init.size(0) + batch_size - 1) // batch_size
 batch_num_coll = (coords_coll.size(0) + batch_size - 1) // batch_size
 
 steps_per_epoch = max(batch_num_data, batch_num_init, batch_num_coll)
-
-for epoch in range(epochs):
+print("Starting training!")
+for epoch in tqdm(range(epochs)):
 
     loss_total_run = 0.0
     loss_data_run = 0.0
@@ -112,7 +112,7 @@ for epoch in range(epochs):
     count_init = 0
     count_coll = 0
 
-    for step in range(steps_per_epoch):
+    for step in tqdm(range(steps_per_epoch)):
 
         idx_data = step % batch_num_data
         idx_init = step % batch_num_init
@@ -186,7 +186,7 @@ for epoch in range(epochs):
         a_y_track.append(model.beta_y().item())
         a_z_track.append(model.beta_z().item())
 
-    if epoch % 1000 == 0:
+    if epoch % 1 == 0:
         print(
             f"[{epoch:5d}] "
             f"L_data={epoch_data:.3e} | "
