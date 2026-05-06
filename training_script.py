@@ -17,27 +17,40 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # -----------------------------
 # Training parameters
 # -----------------------------
-lr = 1e-3
+lr_model = 1e-4
+lr_param = 1e-6
 lambda_data = 1.0
 lambda_pde = 1.0
 lambda_init = 1.0
-epochs = 40000
-batch_size = 524288
+epochs = 6000
+batch_size = 1024
 hidden_layers = 3
 number_of_neurons = 100
 
-init_log_beta_x = -2.9967
-init_log_beta_y = -3.1308
-init_log_beta_z = -0.3851
+educated_guess=False # Determine if we want to investigate the exact solution or good guess case
 
-mode = False   # False = freeze diffusivities, True = inverse
-subsampling = 2
+if educated_guess==False:
+    # Exact ground truth # [W/(m k)]
+    init_kx = 2.23 
+    init_ky = 1.95 
+    init_kz = 0.93 
+elif educated_guess==True:
+    init_kx=3
+    init_ky=3
+    init_kz=3
+
+
+mode_1 = True  # False = freeze diffusivities, True = inverse for x component
+mode_2 = True   # False = freeze diffusivities, True = inverse for y component
+mode_3 = True   # False = freeze diffusivities, True = inverse for z component
+subsampling = 100
+subsampling_init=2
 
 # Collocation parameters
-N_coll = 1000
-W_coll = 400
-H_coll = 400
-subsample_coll = 4
+N_coll = 500
+W_coll = 200
+H_coll = 200
+subsample_coll = 100
 
 # -----------------------------
 # Load data
@@ -54,14 +67,42 @@ T_max = dT.max()
 
 T_norm = dT / T_max
 T_patch = torch.from_numpy(T_norm).float()
+
+# Required for normalization
 Nt, H, W = T_patch.size()
+
+# Normalization parameters
+dxy=1e-4 # one pixel is 0.1 mm in spatial coordinates
+dt=1/50 # 50 fps is camera recording
+
+
+Lx=W*dxy # Number of pixels times spatial resolution of the camera
+Ly=H*dxy # Number of pixels times spatial resolution of the camera
+Lz=3.5e-3 # Thickness of sample is 3.5 [mm]
+tc=(Nt-1)*dt # Number of frames times time period
 
 # -----------------------------
 # Data generation
 # -----------------------------
 coords, values = create_training_data(T_patch, subsampling)
-coords_init, values_init = create_initial_data(T_patch, subsampling)
+coords_init, values_init = create_initial_data(T_patch, subsampling_init)
 coords_coll = create_collocation_points(N_coll, W_coll, H_coll, subsample_coll)
+
+print("coords shape:", coords.shape)
+print("coords_init shape:", coords_init.shape)
+print("coords_coll shape:", coords_coll.shape)
+
+print("coords min:", coords.min(dim=0).values)
+print("coords max:", coords.max(dim=0).values)
+
+print("coords_coll min:", coords_coll.min(dim=0).values)
+print("coords_coll max:", coords_coll.max(dim=0).values)
+
+print("Physical scales:")
+print(f"Lx = {Lx:.6e} m")
+print(f"Ly = {Ly:.6e} m")
+print(f"Lz = {Lz:.6e} m")
+print(f"tc = {tc:.6e} s")
 
 # -----------------------------
 # Model
@@ -69,18 +110,29 @@ coords_coll = create_collocation_points(N_coll, W_coll, H_coll, subsample_coll)
 model = SurfacePINN(
     hidden_layers=hidden_layers,
     hidden_neurons=number_of_neurons,
-    init_log_beta_x=init_log_beta_x,
-    init_log_beta_y=init_log_beta_y,
-    init_log_beta_z=init_log_beta_z
+    init_kx=init_kx,
+    init_ky=init_ky,
+    init_kz=init_kz
 ).to(device)
 
 model.train()
 
-model.log_beta_x.requires_grad = mode
-model.log_beta_y.requires_grad = mode
-model.log_beta_z.requires_grad = mode
+model.kx.requires_grad = mode_1
+model.ky.requires_grad = mode_2
+model.kz.requires_grad = mode_3
 
-optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+optimizer = torch.optim.Adam(
+    [
+        {
+            "params": model.net.parameters(),
+            "lr": lr_model,
+        },
+        {
+            "params": [model.kx, model.ky, model.kz],
+            "lr": lr_param,
+        },
+    ]
+)
 
 # -----------------------------
 # Tracking
@@ -90,9 +142,9 @@ loss_data_hist = []
 loss_pde_hist = []
 loss_init_hist = []
 
-a_x_track = []
-a_y_track = []
-a_z_track = []
+k_x_track = []
+k_y_track = []
+k_z_track = []
 
 # separate batch counts
 batch_num_data = (coords.size(0) + batch_size - 1) // batch_size
@@ -143,7 +195,7 @@ for epoch in tqdm(range(epochs)):
         y_c = coords_coll_b[:, 1:2].clone().detach().requires_grad_(True)
         t_c = coords_coll_b[:, 2:3].clone().detach().requires_grad_(True)
 
-        loss_p = pde_loss(model, x_c, y_c, t_c)
+        loss_p = pde_loss(model, x_c, y_c, t_c,Lx,Ly,Lz,tc)
 
         loss = lambda_data * loss_d + lambda_pde * loss_p + lambda_init * loss_i
 
@@ -151,6 +203,7 @@ for epoch in tqdm(range(epochs)):
         loss.backward()
         optimizer.step()
 
+        model.clamp_conductivities(k_min=0.1, k_max=10.0)
         # ------------------- weighted running averages -------------------
         n_data = values_b.size(0)
         n_init = values_init_b.size(0)
@@ -182,9 +235,9 @@ for epoch in tqdm(range(epochs)):
 
     with torch.no_grad():
         # if your model uses beta->alpha conversion, adapt this
-        a_x_track.append(model.beta_x().item())
-        a_y_track.append(model.beta_y().item())
-        a_z_track.append(model.beta_z().item())
+        k_x_track.append(model.k_x().item())
+        k_y_track.append(model.k_y().item())
+        k_z_track.append(model.k_z().item())
 
     if epoch % 1 == 0:
         print(
@@ -193,9 +246,9 @@ for epoch in tqdm(range(epochs)):
             f"L_init={epoch_init:.3e} | "
             f"L_pde={epoch_pde:.3e} | "
             f"L_total={epoch_total:.3e} | "
-            f"βx={model.beta_x().item():.2e} | "
-            f"βy={model.beta_y().item():.2e} | "
-            f"βz={model.beta_z().item():.2e}"
+            f"kx={model.k_x().item():.2e} | "
+            f"ky={model.k_y().item():.2e} | "
+            f"kz={model.k_z().item():.2e}"
         )
 
 model.eval()
@@ -208,12 +261,13 @@ torch.save(torch.tensor(loss_total_hist), 'total_loss.pt')
 torch.save(torch.tensor(loss_data_hist), 'data_loss.pt')
 torch.save(torch.tensor(loss_init_hist), 'init_loss.pt')
 torch.save(torch.tensor(loss_pde_hist), 'pde_loss.pt')
-torch.save(torch.tensor(a_x_track), 'a_x_track.pt')
-torch.save(torch.tensor(a_y_track), 'a_y_track.pt')
-torch.save(torch.tensor(a_z_track), 'a_z_track.pt')
+torch.save(torch.tensor(k_x_track), 'k_x_track.pt')
+torch.save(torch.tensor(k_y_track), 'k_y_track.pt')
+torch.save(torch.tensor(k_z_track), 'k_z_track.pt')
 
 config = {
-    "lr": lr,
+    "lr model": lr_model,
+    "lr_param": lr_param,
     "lambda_data": lambda_data,
     "lambda_pde": lambda_pde,
     "lambda_init": lambda_init,
@@ -221,15 +275,27 @@ config = {
     "batch_size": batch_size,
     "hidden_layers": hidden_layers,
     "number_of_neurons": number_of_neurons,
-    "init_log_beta_x": init_log_beta_x,
-    "init_log_beta_y": init_log_beta_y,
-    "init_log_beta_z": init_log_beta_z,
-    "mode": mode,
+    "init_kx": init_kx,
+    "init_ky": init_ky,
+    "init_kz": init_kz,
+    "mode_x": mode_1,
+    "mode_y": mode_2,
+    "mode_z": mode_3,
     "subsampling": subsampling,
+    "subsampling_init":subsampling_init,
     "N_coll": N_coll,
     "W_coll": W_coll,
     "H_coll": H_coll,
     "subsample_coll": subsample_coll,
+    "frames":Nt,
+    "Height":H,
+    "Width":W,
+    "Spatial resolution per px [m]": dxy,
+    "Temporal resolution [s]": dt,
+    "X-scale [m]": Lx,
+    "Y-scale [m]": Ly,
+    "Z thickness [m]":Lz,
+    "Characteristic time":tc,
 }
 
 with open("config.json", "w") as f:

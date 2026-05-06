@@ -41,32 +41,65 @@ def gradients(u, x, order=1):
     else:
         raise ValueError("order must be 1 or 2")
     
-def pde_residual_normalized(model, x, y, t):
+def pde_residual_normalized(model, x, y, t, Lx, Ly, Lz, tc):
     """
-    PDE residual in normalized coordinates for:
+    PDE residual in normalized coordinates for the reduced surface model:
 
         theta_t = beta_x * theta_xx + beta_y * theta_yy - beta_z * pi^2 * theta
 
-    Residual:
-        r = theta_t - beta_x*theta_xx - beta_y*theta_yy + beta_z*pi^2*theta
+    where:
 
-    Inputs x, y, t are normalized to [0,1] and require grad.
+        beta_x = alpha_x * tc / Lx^2
+        beta_y = alpha_y * tc / Ly^2
+        beta_z = alpha_z * tc / Lz^2
+
+    and:
+
+        alpha_i = k_i / (rho * cp)
+
+    The model directly trains physical thermal conductivities:
+
+        kx, ky, kz [W/(m K)]
+
+    Inputs:
+        x, y, t : normalized coordinates in [0, 1]
+        Lx      : physical x length scale [m]
+        Ly      : physical y length scale [m]
+        Lz      : physical thickness / z scale [m]
+        tc      : physical time scale [s]
+
+    Residual:
+
+        r = theta_t - beta_x*theta_xx - beta_y*theta_yy + beta_z*pi^2*theta
     """
+
     theta = model(x, y, t)
 
     theta_t  = gradients(theta, t, order=1)
     theta_xx = gradients(theta, x, order=2)
     theta_yy = gradients(theta, y, order=2)
 
-    beta_x = model.beta_x()
-    beta_y = model.beta_y()
-    beta_z = model.beta_z()
+    # physical diffusivities [m^2/s]
+    alpha_x = model.alpha_x()
+    alpha_y = model.alpha_y()
+    alpha_z = model.alpha_z()
 
-    residual = theta_t - beta_x * theta_xx - beta_y * theta_yy + beta_z * (math.pi ** 2) * theta
+    # convert physical diffusivities to normalized PDE coefficients
+    beta_x = alpha_x * tc / (Lx ** 2)
+    beta_y = alpha_y * tc / (Ly ** 2)
+    beta_z = alpha_z * tc / (Lz ** 2)
+
+    residual = (
+        theta_t
+        - beta_x * theta_xx
+        - beta_y * theta_yy
+        + beta_z * (math.pi ** 2) * theta
+    )
+
     return residual
 
-def pde_loss(model, x, y, t):
-    r = pde_residual_normalized(model, x, y, t)
+def pde_loss(model, x, y, t,Lx,Ly,Lz,tc):
+    r = pde_residual_normalized(model, x, y, t,Lx,Ly,Lz,tc)
     return torch.mean(r ** 2)
 
 #---------------------------------------------- Data loss --------------------------
